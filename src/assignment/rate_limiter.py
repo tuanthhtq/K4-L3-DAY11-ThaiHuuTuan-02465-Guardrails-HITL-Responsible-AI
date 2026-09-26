@@ -18,9 +18,13 @@ class RateLimitPlugin(base_plugin.BasePlugin):
 
     def __init__(self, max_requests: int = 10, window_seconds: int = 60):
         super().__init__(name="rate_limiter")
+        if max_requests < 1:
+            raise ValueError("max_requests must be at least 1")
+        if window_seconds < 1:
+            raise ValueError("window_seconds must be at least 1")
         self.max_requests = max_requests
         self.window_seconds = window_seconds
-        self.user_windows: dict[str, deque] = defaultdict(deque)
+        self.user_windows: dict[str, deque[float]] = defaultdict(deque)
         self.blocked_count = 0
         self.total_count = 0
 
@@ -37,13 +41,16 @@ class RateLimitPlugin(base_plugin.BasePlugin):
         now = time.time()
         window = self.user_windows[user_id]
 
-        # TODO: Implement sliding window:
-        # 1. Pop timestamps older than (now - window_seconds) from the left
-        # 2. If len(window) >= max_requests:
-        #       wait = window_seconds - (now - window[0])
-        #       self.blocked_count += 1
-        #       return self._block_response(
-        #           f"Rate limit exceeded. Try again in {wait:.0f}s."
-        #       )
-        # 3. Else: append now, return None
-        raise NotImplementedError("Implement RateLimitPlugin.on_user_message_callback")
+        cutoff = now - self.window_seconds
+        while window and window[0] <= cutoff:
+            window.popleft()
+
+        if len(window) >= self.max_requests:
+            wait = max(0.0, self.window_seconds - (now - window[0]))
+            self.blocked_count += 1
+            return self._block_response(
+                f"Rate limit exceeded. Try again in {wait:.0f}s."
+            )
+
+        window.append(now)
+        return None
